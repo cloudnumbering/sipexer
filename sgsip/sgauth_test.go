@@ -301,4 +301,3 @@ func TestSGAKAHandleChallenge(t *testing.T) {
 		t.Fatalf("expected invalid key error")
 	}
 }
-

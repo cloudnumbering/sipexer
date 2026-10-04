@@ -659,7 +659,7 @@ func SGSIPParamsGet(paramStr string, paramName string, vmode int, paramVal *SGSI
 	if len(strArray) == 1 {
 		return SGSIPRetErrParamNotFound
 	}
-	scPos := -1
+	var scPos int
 	qVal := 0
 	if strArray[1][0:1] == "\"" {
 		if vmode == 0 {
