@@ -876,7 +876,7 @@ func main() {
 				lTAddr = "127.0.0.1:55060"
 			}
 			var msgVal sgsip.SGSIPMessage = sgsip.SGSIPMessage{}
-			var smsg string = ""
+			var smsg string
 			tret = SIPExerPrepareMessage(tplstr, tplfields, dstSockAddr.Proto, lTAddr, dstSockAddr.Addr+":"+dstSockAddr.Port, &msgVal)
 			if tret != 0 {
 				SIPExerExit(tret)
@@ -1113,7 +1113,7 @@ func SIPExerRunCallSelf(dstSockAddr sgsip.SGSIPSocketAddress, wsurlp *url.URL, t
 	cliops.invite = false
 	cliops.method = "REGISTER"
 	SIPExerPrintf(SIPExerLogInfo, "self-call stage: REGISTER\n")
-	ret := SIPExerRetErr
+	var ret int
 	if seDlg != nil {
 		SIPExerDialogResetForRequest(seDlg)
 		ret = SIPExerDialogLoop(tplstr, regFields, seDlg)
@@ -1159,7 +1159,7 @@ func SIPExerRunCallUsersCalleeUDP(localAddr string, u2fuser string, ringtime int
 		SIPExerPrintf(SIPExerLogError, "call-users callee socket error: %v\n", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	ready <- true
 
 	state := "wait-invite"
@@ -1732,7 +1732,7 @@ func SIPExerPrepareMessage(tplstr string, tplfields map[string]any, rProto strin
 	var buf bytes.Buffer
 	var tpl = template.Must(template.New("wsout").Parse(tplstr))
 	var msgrebuild bool = false
-	var ok bool = false
+	var ok bool
 
 	if cliops.raw {
 		msgVal.Data = tplstr
@@ -1796,7 +1796,10 @@ func SIPExerPrepareMessage(tplstr string, tplfields map[string]any, rProto strin
 		tplfields["contacturi"] = "<sip:" + lAddr + ";transport=" + strings.ToLower(rProto) + ">"
 	}
 
-	tpl.Execute(&buf, tplfields)
+	if err := tpl.Execute(&buf, tplfields); err != nil {
+		SIPExerPrintf(SIPExerLogError, "failed to render sip template: %v\n", err)
+		return SIPExerErrSIPMessageFormat
+	}
 
 	var smsg string
 	smsg = strings.Replace(buf.String(), "$rmeol\n", "", -1)
@@ -1848,17 +1851,26 @@ func SIPExerPrepareMessage(tplstr string, tplfields map[string]any, rProto strin
 		} else if len(templateBody) > 0 {
 			var bufBody bytes.Buffer
 			var tplBody = template.Must(template.New("wbodyout").Parse(templateBody))
-			tplBody.Execute(&bufBody, tplfields)
+			if err := tplBody.Execute(&bufBody, tplfields); err != nil {
+				SIPExerPrintf(SIPExerLogError, "failed to render body template: %v\n", err)
+				return SIPExerErrSIPMessageFormat
+			}
 			msgVal.Body.Content = strings.Replace(bufBody.String(), "$rmeol\n", "", -1)
 		} else if cliops.message {
 			var bufBody bytes.Buffer
 			var tplBody = template.Must(template.New("wbodyout").Parse(templateDefaultMessageBody))
-			tplBody.Execute(&bufBody, tplfields)
+			if err := tplBody.Execute(&bufBody, tplfields); err != nil {
+				SIPExerPrintf(SIPExerLogError, "failed to render body template: %v\n", err)
+				return SIPExerErrSIPMessageFormat
+			}
 			msgVal.Body.Content = strings.Replace(bufBody.String(), "$rmeol\n", "", -1)
 		} else if cliops.invite {
 			var bufBody bytes.Buffer
 			var tplBody = template.Must(template.New("wbodyout").Parse(templateDefaultInviteBody))
-			tplBody.Execute(&bufBody, tplfields)
+			if err := tplBody.Execute(&bufBody, tplfields); err != nil {
+				SIPExerPrintf(SIPExerLogError, "failed to render body template: %v\n", err)
+				return SIPExerErrSIPMessageFormat
+			}
 			msgVal.Body.Content = strings.Replace(bufBody.String(), "$rmeol\n", "", -1)
 			if cliops.lateoffer {
 				msgVal.MFlags = msgVal.MFlags | sgsip.SGSIPMFlagLateOffer
@@ -2012,14 +2024,18 @@ func SIPExerProcessResponse(msgVal *sgsip.SGSIPMessage, rmsg []byte, sipRes *sgs
 }
 
 func SIPExerSetWriteTimeoutValue(seDlg *SIPExerDialog, tVal int) {
+	var err error
 	if seDlg.ProtoId == sgsip.ProtoUDP {
-		seDlg.ConnUDP.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
+		err = seDlg.ConnUDP.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
 	} else if seDlg.ProtoId == sgsip.ProtoTCP {
-		seDlg.ConnTCP.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
+		err = seDlg.ConnTCP.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
 	} else if seDlg.ProtoId == sgsip.ProtoTLS {
-		seDlg.ConnTLS.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
+		err = seDlg.ConnTLS.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
 	} else if seDlg.ProtoId == sgsip.ProtoWSS || seDlg.ProtoId == sgsip.ProtoWS {
-		seDlg.ConnWSS.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
+		err = seDlg.ConnWSS.Conn.SetWriteDeadline(time.Now().Add(time.Millisecond * time.Duration(tVal)))
+	}
+	if err != nil {
+		SIPExerPrintf(SIPExerLogError, "failed to set write deadline: %v\n", err)
 	}
 }
 
@@ -2104,7 +2120,7 @@ func SIPExerDialogReadBytes(seDlg *SIPExerDialog) int {
 }
 
 func SIPExerSessionWaitAndRead(seDlg *SIPExerDialog) int {
-	var smsg string = ""
+	var smsg string
 	tStart := time.Now()
 	tWait := cliops.sessionwait
 	for {
@@ -2260,7 +2276,7 @@ func SIPExerFindRequestStartInBuffer(rawBuf string, reqMethod string) int {
 }
 
 func SIPExerDialogLoop(tplstr string, tplfields map[string]any, seDlg *SIPExerDialog) int {
-	var smsg string = ""
+	var smsg string
 	var sack string = ""
 	var err error
 	var wmsg []byte
@@ -2710,7 +2726,7 @@ func SIPExerSendUDP(dstSockAddr sgsip.SGSIPSocketAddress, tplstr string, tplfiel
 		tchan <- ret
 		return
 	}
-	defer seDlg.ConnUDP.Conn.Close()
+	defer func() { _ = seDlg.ConnUDP.Conn.Close() }()
 	ret = SIPExerDialogLoop(tplstr, tplfields, &seDlg)
 	tchan <- ret
 }
@@ -2738,19 +2754,19 @@ func SIPExerDialogCloseConn(seDlg *SIPExerDialog) {
 		return
 	}
 	if seDlg.ProtoId == sgsip.ProtoUDP && seDlg.ConnUDP != nil && seDlg.ConnUDP.Conn != nil {
-		seDlg.ConnUDP.Conn.Close()
+		_ = seDlg.ConnUDP.Conn.Close()
 		return
 	}
 	if seDlg.ProtoId == sgsip.ProtoTCP && seDlg.ConnTCP != nil && seDlg.ConnTCP.Conn != nil {
-		seDlg.ConnTCP.Conn.Close()
+		_ = seDlg.ConnTCP.Conn.Close()
 		return
 	}
 	if seDlg.ProtoId == sgsip.ProtoTLS && seDlg.ConnTLS != nil && seDlg.ConnTLS.Conn != nil {
-		seDlg.ConnTLS.Conn.Close()
+		_ = seDlg.ConnTLS.Conn.Close()
 		return
 	}
 	if (seDlg.ProtoId == sgsip.ProtoWS || seDlg.ProtoId == sgsip.ProtoWSS) && seDlg.ConnWSS != nil && seDlg.ConnWSS.Conn != nil {
-		seDlg.ConnWSS.Conn.Close()
+		_ = seDlg.ConnWSS.Conn.Close()
 		return
 	}
 }
@@ -2822,14 +2838,14 @@ func SIPExerInitUDPDialog(dstSockAddr sgsip.SGSIPSocketAddress, seDlg *SIPExerDi
 		conn1, err = net.DialUDP(strAFProto, nil, seDlg.ConnUDP.DstAddr)
 		if err != nil {
 			SIPExerPrintf(SIPExerLogError, "error: %v (proto: %v - local: %v - remote: %v)\n", err, strAFProto, lAddr, seDlg.ConnUDP.DstAddr)
-			seDlg.ConnUDP.Conn.Close()
+			_ = seDlg.ConnUDP.Conn.Close()
 			return SIPExerErrUDPDial
 		}
 		lAddr1 := conn1.LocalAddr().String()
 		lIdx0 := strings.LastIndex(lAddr, ":")
 		lIdx1 := strings.LastIndex(lAddr1, ":")
 		lAddr = lAddr1[:lIdx1] + lAddr[lIdx0:]
-		conn1.Close()
+		_ = conn1.Close()
 	}
 
 	seDlg.LocalAddr = lAddr
@@ -2959,7 +2975,6 @@ func SIPExerInitTLSDialog(dstSockAddr sgsip.SGSIPSocketAddress, seDlg *SIPExerDi
 			SIPExerPrintln(SIPExerLogDebug, v.Subject)
 		}
 		SIPExerPrintln(SIPExerLogDebug, "client: handshake: ", state.HandshakeComplete)
-		SIPExerPrintln(SIPExerLogDebug, "client: mutual: ", state.NegotiatedProtocolIsMutual)
 	}
 
 	seDlg.LocalAddr = seDlg.ConnTLS.Conn.LocalAddr().String()
@@ -2973,7 +2988,7 @@ func SIPExerInitTLSDialog(dstSockAddr sgsip.SGSIPSocketAddress, seDlg *SIPExerDi
 
 func SIPExerInitWSXDialog(dstSockAddr sgsip.SGSIPSocketAddress, wsurlp *url.URL, seDlg *SIPExerDialog) int {
 	var err error
-	var wsorgp *url.URL = nil
+	var wsorgp *url.URL
 
 	seDlg.Proto = dstSockAddr.Proto
 	seDlg.ProtoId = dstSockAddr.ProtoId

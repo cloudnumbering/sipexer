@@ -1,0 +1,12 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  settings:
+    staticcheck:
+      # Check correctness and simplifications without rewriting the fork's style.
+      checks: ["SA*", "S*"]
+formatters:
+  enable:
+    - gofmt

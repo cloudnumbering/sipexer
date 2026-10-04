@@ -493,3 +493,17 @@ func TestSplitSIPMessages(t *testing.T) {
 		t.Fatalf("unexpected split result")
 	}
 }
+
+func TestPrepareMessageRejectsTemplateExecutionError(t *testing.T) {
+	withCleanState(t, func() {
+		cliops.noparse = true
+		msg := sgsip.SGSIPMessage{}
+		ret := SIPExerPrepareMessage("X: {{index .missing 0}}\n\n", map[string]any{}, "udp", "127.0.0.1:5060", "127.0.0.1:5070", &msg)
+		if ret != SIPExerErrSIPMessageFormat {
+			t.Fatalf("expected template error, got %d", ret)
+		}
+		if msg.Data != "" {
+			t.Fatalf("partial template was accepted: %q", msg.Data)
+		}
+	})
+}

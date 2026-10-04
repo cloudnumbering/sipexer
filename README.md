@@ -460,3 +460,9 @@ Contributions are welcome!
 Fork and do pull requests:
 
   * https://github.com/miconda/sipexer
+
+## Local checks
+
+Use Go 1.27.1 and golangci-lint 2.14.0, then run `make check` for formatting,
+vet, race tests, build, and lint. The Go checks workflow runs the same checks
+for pull requests to `main`.
